@@ -1,0 +1,35 @@
+{
+  "name": "ai-viewer",
+  "version": "1.0.0",
+  "description": "",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/main.ts",
+    "build": "tsc",
+    "start": "node dist/main.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.28.0",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^25.5.0",
+    "@types/uuid": "^10.0.0",
+    "better-sqlite3": "^12.8.0",
+    "chokidar": "^5.0.0",
+    "tree-sitter": "^0.21.1",
+    "tree-sitter-java": "^0.23.5",
+    "tree-sitter-typescript": "^0.23.2",
+    "ts-node": "^10.9.2",
+    "uuid": "^13.0.0",
+    "vscode-jsonrpc": "^8.2.1",
+    "vscode-languageserver-protocol": "^3.17.5"
+  },
+  "devDependencies": {
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2",
+    "typescript-language-server": "^5.1.3"
+  }
+}
