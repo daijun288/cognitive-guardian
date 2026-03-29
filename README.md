@@ -25,7 +25,7 @@
   "mcpServers": {
     "cognitive-guardian": {
       "command": "npx",
-      "args": ["tsx", "~/cognitiveg-uardian/src/main.ts"]
+      "args": ["tsx", "~/cognitive-guardian/src/main.ts"]
     }
   }
 }
