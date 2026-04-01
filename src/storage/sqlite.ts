@@ -157,6 +157,75 @@ export class KnowledgeGraphStore {
     return this.getCallers(nodeId);
   }
 
+  // --- Phase 6: Subtraction Strategy (Smart Pruning Engine) ---
+
+  /**
+   * 1. find_xml_mapping: Precision mapping for MyBatis XMLs
+   */
+  public getXmlMappingsForClass(className: string): Node[] {
+    return this.db.prepare(`
+      SELECT DISTINCT target.* 
+      FROM nodes target
+      JOIN edges e ON target.id = e.targetId
+      JOIN nodes source ON e.sourceId = source.id
+      WHERE source.type IN ('class', 'interface', 'method')
+      AND source.file LIKE ?
+      AND json_extract(e.metadata, '$.isMyBatisLink') = true
+    `).all(`%${className}%`) as Node[];
+  }
+
+  /**
+   * 2. find_frontend_api_calls: Find Cross-Stack dependencies (Vue -> Java API)
+   */
+  public getFrontendCallsForApi(apiNameOrPath: string): Node[] {
+    const searchPattern = `%${apiNameOrPath}%`;
+    return this.db.prepare(`
+      SELECT DISTINCT frontend.* 
+      FROM nodes frontend
+      JOIN edges e ON frontend.id = e.sourceId
+      JOIN nodes backend ON e.targetId = backend.id
+      WHERE json_extract(e.metadata, '$.isCrossStack') = true
+      AND (backend.name LIKE ? OR json_extract(backend.metadata, '$.apiPath') LIKE ?)
+    `).all(searchPattern, searchPattern) as Node[];
+  }
+
+  /**
+   * 3. find_cross_module_deps: Cross-boundary API usages
+   */
+  public getCrossModuleCallers(className: string): Node[] {
+    const classNodes = this.db.prepare(`SELECT * FROM nodes WHERE type IN ('class', 'interface', 'enum') AND name = ?`).all(className) as Node[];
+    if (classNodes.length === 0) return [];
+    
+    const results: Node[] = [];
+    const seen = new Set<string>();
+
+    const stmt = this.db.prepare(`
+      SELECT DISTINCT caller.* 
+      FROM nodes caller
+      JOIN edges e ON caller.id = e.sourceId
+      JOIN nodes target ON e.targetId = target.id
+      WHERE target.file = ?
+      AND e.type IN ('calls', 'data_flow')
+      AND caller.file != ?
+    `);
+
+    for (const cn of classNodes) {
+      const targetDir = cn.file.substring(0, cn.file.lastIndexOf('/'));
+      const callers = stmt.all(cn.file, cn.file) as Node[];
+      
+      for (const caller of callers) {
+        if (seen.has(caller.id)) continue;
+        const callerDir = caller.file.substring(0, caller.file.lastIndexOf('/'));
+        // strictly filter out same folder (cross-boundary only)
+        if (callerDir !== targetDir) {
+          seen.add(caller.id);
+          results.push(caller);
+        }
+      }
+    }
+    return results;
+  }
+
   /**
    * V6.9 Deep Dependencies: If the source is a class/interface, aggregate dependencies of its members.
    */
