@@ -2,27 +2,27 @@
 
 > **极速拓扑感应器** —— 这是一个为 AI 开发者量身定制的、**全自动静默运行**的 MCP Server，致力于提供工业级、低延迟的代码上下文感知能力。
 
-## 🌟 核心理念：AI 的“副驾驶导航仪”
+## 🌟 核心理念：做减法与专注盲区 (Subtraction Strategy)
 在 AI 编码时代，最昂贵的动作不是“写”，而是“确认修改的影响”。
 
-本系统采用 **“前台极速解析 + 后台静默索引”** 架构。它静静潜伏在您的 IDE（如 Claude Desktop 或 Cursor）后台，当 AI 准备修改代码时，它能秒级提供全局视野，准确指出跨文件、跨模块甚至跨端的连锁反应。
+本系统专门采用 **“做减法与专注盲区” (Subtraction & Blind-spot Focus)** 策略。它静静潜伏在您的 IDE（如 Claude Desktop 或 Cursor）后台，致力于为您提供**低噪、高优的跨层级依赖预警**，彻底摒弃那些让人眼花缭乱且极度消耗 Token 的全量依赖图谱。它专治 AI 进行跨语言、跨框架修改时的上下文缺失问题。
 
-## 🚀 核心看点与最新优化 (IDEA 架构级提速)
+## 🚀 核心看点与最新优化
 
-在经历了一系列深度重构后，Guardian 从原型系统正式蜕变为具备工业级鲁棒高性能的代码导航引擎：
+在经历了一系列深度重构后，Guardian 实现了从“堆砌数据”到“精准狙击”的蜕变：
 
-- ⚡ **O(1) 毫秒级感应**：
+- 🎯 **高信噪比的定向追踪 (Sniper Tools)**：
+  - 弃用臃肿且噪音巨大的通用依赖分析接口（如旧版 `impact_brief`）。
+  - **`find_xml_mapping`**: 专供修改 MyBatis Mapper 时强制触发，直达 XML SQL 映射盲区防越界。
+  - **`find_frontend_api_calls`**: 专注跨端依赖分析，打通 Java Controller 与 Vue/React 前端代码的 API 隐式调用关联。
+  - **`find_cross_module_deps`**: 核心服务重构前预检，精准剪枝提取 Top 5 最具破坏性的跨目录/跨模块依赖涟漪。
+- ⚡ **O(1) 毫秒级底层索引**：
   - 弃用缓慢的 JS 全表扫描，全面改用 **SQLite B-Tree 索引** 查询。
-  - 启用 **SQLite WAL 模式** 与 **预编译 SQL 缓存**，将元数据条件检索全数下推至 SQLite `json_extract` 底层，使初始化与增量更新极速完成。
-  - 采用并行的异步 I/O (消除大规模 `statSync` 长耗时阻塞)。
+  - 启用 **SQLite WAL 模式** 与 **预编译 SQL 缓存**，将元数据条件检索全数下推至 SQLite `json_extract` 底层。
 - 🔄 **强一致性实时感知 (`sync_file`)**: 
-  - 新增专用 MCP 强制同步工具。AI 发生代码修改后，可通过该接口显式穿透系统防抖延迟，瞬间获得毫无时差的最新知识图谱。
-  - 升级 Watcher，彻底杜绝僵尸节点重现。
+  - 升级 Watcher，彻底杜绝僵尸节点重现。用户发生代码修改后，系统秒级防抖并重建映射圈。
 - 🌊 **高并发与流式架构**: 
-  - 将庞大的 Git 历史分析从阻塞式重构为 **`spawn + readline` 非阻塞流式处理**，彻底消除在巨型项目上的 OOM(内存溢出) 危机。
-  - 基于 `Promise.allSettled` 并行发发调度 LSP 解析任务，化解串行拖拽耗时。
-- 🛡️ **优雅降级安全策略**: 
-  - 阶梯式探测：优先唤起 LSP，出现死锁或超时则安全降级回 Tree-sitter 无损静态树解析。全链路实现空指针防御检查。
+  - 基于 `spawn + readline` 的非阻塞流式处理，彻底消除大型项目 OOM 危机；基于 `Promise.allSettled` 并发分发 LSP 解析任务。
 
 ## 🛠 配置与运行 (静默模式)
 
@@ -30,7 +30,7 @@
 
 ### 推荐配置
 
-在对应的 MCP 配置文件中添加以下内容（请确保已安装 `npx` 等依赖）：
+在对应的 MCP 配置文件中添加以下内容（请确保已安装 `npx` 等运行依赖）：
 
 ```json
 {
@@ -44,10 +44,10 @@
 ```
 
 > [!NOTE]
-> **自动初始化**：当您在 AI 助手环境调用并进入目标项目文件夹时，系统会自动在目标工程的根目录下创建 `.guardian/` 文件夹来存放独立数据库索引与排错日志。它不会侵入业务代码，可以放心按需配置 `.gitignore`。
+> **自动初始化**：当您在 AI 助手环境调用并进入目标项目文件夹时，系统会自动在目标工程的根目录下创建 `.guardian/` 文件夹来存放独立数据库索引与排错日志。它不会侵入业务代码，可以放心接纳或按需配置 `.gitignore`。
 
 ### 开发者模式 (手动调试)
-如果您需要观察内部的流转与解析网络：
+如果您需要观察内部的工具输出与流转过程：
 ```bash
 npm install
 npm run dev
@@ -55,16 +55,16 @@ npm run dev
 
 ## 🤖 引导 AI 正确使用 (强烈推荐)
 
-本 MCP 的最大发挥前提是 **让 AI 知道何时触发它、何时不要触发它**，以达到最佳的性能与防雷达平衡。
+本 MCP 的最大发挥前提是 **让 AI 知道它现在拥有一把狙击枪，而不是霰弹枪**。
 
-建议将本仓库中的 [`AI_AGENT_INSTRUCTIONS.md`](AI_AGENT_INSTRUCTIONS.md) (约 1000 字符) 的全部内容提取，合并写入到您目标业务工程根目录下的以下任意文件中：
-- `.cursorrules` (如果是 Cursor)
-- `CLAUDE.md` (如果是 Claude Desktop/Code)
-- 或以系统提示词 (System Prompt) 形式配置给你的代理客户端。
+强烈建议将本仓库中的 [`AI_AGENT_INSTRUCTIONS.md`](AI_AGENT_INSTRUCTIONS.md) 的全部内容提取，合并写入到您目标业务工程根目录下的以下任意引导文件中：
+- `.cursorrules` (若使用 Cursor)
+- `CLAUDE.md` (若使用 Claude UI / Code)
+- 或以 System Prompt 形式配置给您的代理客户端。
 
 ## 📂 项目模块结构
-- `src/engine/`: 中枢扫描引擎 (Orchestrator)、Git 脉络流式重构提取、并发 FileWatcher。
-- `src/mcp/`: 标准化大模型对话接口层 (MCP工具箱包含 `impact_brief`, `sync_file` 等)。
+- `src/engine/`: 中枢扫描引擎、核心业务逻辑聚合与流式提取器、并发 FileWatcher。
+- `src/mcp/`: 标准化大模型对话接口层 (MCP 工具箱，包含核心三板斧 `find_xml_mapping`, `find_frontend_api_calls`, `find_cross_module_deps` 等)。
 - `src/storage/`: 基于 SQLite WAL 与原生 JSON 解析优化的知识持久化检索层。
 - `src/main.ts`: 协议激活入口基座。
 
