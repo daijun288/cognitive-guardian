@@ -22,6 +22,8 @@ export class CodeParser {
   public setLanguageByExtension(extension: string) {
     if (extension === '.java') {
       this.parser.setLanguage(Java);
+    } else if (extension === '.tsx') {
+      this.parser.setLanguage((TypeScript as any).tsx);
     } else {
       this.parser.setLanguage((TypeScript as any).typescript);
     }
@@ -387,18 +389,6 @@ export class CodeParser {
         const nameNode = variable?.childForFieldName('name');
         if (nameNode) {
           symbols.push(this.createSymbol(nameNode.text, 'variable', node));
-        }
-        break;
-      }
-      case 'class_declaration':
-      case 'interface_declaration':
-      case 'enum_declaration':
-      case 'record_declaration': {
-        const nameNode = node.childForFieldName('name');
-        if (nameNode) {
-          const type = node.type.replace('_declaration', '') as any;
-          const fqn = packageName ? `${packageName}.${nameNode.text}` : nameNode.text;
-          symbols.push(this.createSymbol(nameNode.text, type === 'enum' || type === 'record' ? 'class' : type, node, { fqn, apiPath: classPath }));
         }
         break;
       }

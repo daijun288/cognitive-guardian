@@ -45,50 +45,61 @@ export class GuardianMcpServer {
       return {
         tools: [
           {
-            name: 'impact_brief',
-            description: '[⚡极速感应] 修改前必读。极速预览单点改动的影响范围（自适应冷启动感应，首运行 500-800ms）。',
+            name: 'check_relevance',
+            description: '[STRATEGIC-FIRST-STEP] 修改任何代码前的“第一道防线”。仅需输入 nodeId，后台将快速感应此节点是否涉及高风险跨层级（如 SQL/Vue/跨服务）引用。如果此工具提示有风险，必须联级调用 impact_brief。',
             inputSchema: {
               type: 'object',
               properties: {
-                nodeId: { type: 'string', description: '修改的方法名、变量名或类名' },
-                filePath: { type: 'string', description: '文件相对或绝对路径' }
+                nodeId: { type: 'string', description: '您准备修改的方法、类或变量名' }
               },
-              required: ['nodeId', 'filePath']
+              required: ['nodeId']
+            }
+          },
+          {
+            name: 'impact_brief',
+            description: '[CRITICAL-RISK-ANALYSIS] 深度风险探测。在执行重构、更名或接口变更前调用。它能发现隐藏在 XML SQL、Vue 模板、微服务接口中的“隐形引用”。建议在 check_relevance 之后或确信有风险时使用。',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                nodeId: { type: 'string', description: '待修改的目标名' },
+                filePath: { type: 'string', description: '所在文件路径（可选，缺失将触发全局搜索）' }
+              },
+              required: ['nodeId']
             }
           },
           {
             name: 'quick_check',
-            description: '[🛠️指令建议] 极速获取改前修正建议。生成结构化任务清单 (suggestedEdits) 供 AI 直接应用。',
+            description: '[ACTION-PLAN-GENERATOR] 生成同步修改任务清单。直接将分析结果转化为 suggestedEdits 行动计划项，确保 AI 能一次性补全所有漏掉的关联修改点，防止编译失败或逻辑裂缝。',
             inputSchema: {
               type: 'object',
               properties: {
-                nodeId: { type: 'string', description: '修改点的 nodeId、方法名或类名' },
-                filePath: { type: 'string', description: '文件相对或绝对路径' }
+                nodeId: { type: 'string', description: '节点名称' },
+                filePath: { type: 'string', description: '文件路径（可选，缺失将触发全局搜索）' }
               },
-              required: ['nodeId', 'filePath']
+              required: ['nodeId']
             }
           },
           {
             name: 'get_call_graph',
-            description: '[🕸️全局拓扑] 重构或大仪架构时使用。深度洞察全局连锁反应。支持全量按需检索。',
+            description: '[TOPOLOGY-EXPLORER] 复杂重构必备。提供 360 度深层拓扑图谱，揭示全局连锁反应。适用于评估架构层面的变更冲击。',
             inputSchema: {
               type: 'object',
               properties: {
-                nodeId: { type: 'string', description: '代码节点的名称或唯一标识' },
-                filePath: { type: 'string', description: '物理文件路径 (如果不确定，可传入猜测路径或项目路径)' },
+                nodeId: { type: 'string', description: '代码节点的名称' },
+                filePath: { type: 'string', description: '物理文件路径（可选）' },
                 direction: { 
                   type: 'string', 
                   enum: ['upstream', 'downstream', 'both'], 
-                  description: '分析方向',
+                  description: '分析方向 (默认 downstream)',
                   default: 'downstream'
                 }
               },
-              required: ['nodeId', 'filePath'],
+              required: ['nodeId'],
             },
           },
           {
             name: 'assess_bulk_impact',
-            description: '[🛡️最终防线] 评估批量修改的全链路冲突风险。返回高精度风险得分与跨模块协同修改建议。',
+            description: '[BULK-STRESS-TEST] 最终一致性校验。在提交包含多个文件的批量修改前调用，识别不同修改点间的逻辑冲突并输出回归测试优先级。',
             inputSchema: {
               type: 'object',
               properties: {
@@ -97,7 +108,7 @@ export class GuardianMcpServer {
                   items: {
                     type: 'object',
                     properties: {
-                      nodeId: { type: 'string', description: '节点名称' },
+                      nodeId: { type: 'string', description: '修改点名' },
                       filePath: { type: 'string', description: '所属文件路径' }
                     }
                   }
@@ -108,12 +119,23 @@ export class GuardianMcpServer {
           },
           {
             name: 'guardian_start',
-            description: '[DEPRECATED] 现已实现全自动无感初始化。仅在需强制重建索引时调用。',
+            description: '[ADMIN-INDEX-REBUILD] 现已全自动。仅在怀疑索引陈旧需强制重建时调用。',
             inputSchema: { 
               type: 'object', 
               properties: {
                 filePath: { type: 'string', description: '项目根路径' }
               } 
+            },
+          },
+          {
+            name: 'sync_file',
+            description: '[FORCE-SYNC] 强制同步索引文件。当 AI 刚刚修改了代码源文件，且需立刻在 500ms 内调用查询类工具前，必须先调用此工具强制刷新图谱，以防查询到陈旧信息。',
+            inputSchema: { 
+              type: 'object', 
+              properties: {
+                filePath: { type: 'string', description: '刚刚发生过修改的物理文件绝对路径' }
+              },
+              required: ['filePath']
             },
           },
         ],
@@ -139,15 +161,16 @@ export class GuardianMcpServer {
     const toolName = request.params.name;
 
     switch (toolName) {
+      case 'check_relevance':
       case 'impact_brief':
       case 'quick_check':
       case 'get_call_graph': {
+        const isRelevance = toolName === 'check_relevance';
         const isImpactBrief = toolName === 'impact_brief';
         const isQuick = toolName === 'quick_check';
         const isGraph = toolName === 'get_call_graph';
         const { nodeId, filePath, direction = 'downstream' } = (request.params.arguments || {}) as any;
         
-        if (!filePath) throw new Error('filePath is required (relative or absolute)');
         if (!nodeId) throw new Error('nodeId (class/method name) is required');
 
         const context = await this.manager.getContext(filePath);
@@ -162,7 +185,7 @@ export class GuardianMcpServer {
            
            // 2. FQN/Qualified Name match
            if (nodeId.includes('.')) {
-              match = list.find((n: any) => n.name === searchName && n.fullName?.replace(/[\\\/]/g, '.').includes(nodeId));
+              match = list.find((n: any) => n.name === searchName && (n.fullName?.replace(/[\\\/]/g, '.') || "").includes(nodeId));
               if (match) return match;
            }
 
@@ -184,7 +207,7 @@ export class GuardianMcpServer {
         let activeContext = context;
 
         // --- Step 1: Search in local file ---
-        if (context) {
+        if (context && filePath) {
            const absolutePath = this.resolvePath(context.rootDir, filePath);
            let fileNodes = context.store.getNodesByFile(absolutePath);
            if (fileNodes.length === 0) {
@@ -264,21 +287,39 @@ export class GuardianMcpServer {
         const complexityScore = collaborators.length * 10;
         const duration = Date.now() - startTs;
         
-        let resultText = `### ${isGraph ? '🕸️ 全局拓扑' : (isImpactBrief ? '⚡ 极速感应' : '🛡️ 变更建议')}: [${targetNode.name}]\n`;
-        resultText += `> 发现 **${collaborators.length}** 个受影响路径 (总感应耗时: ${duration}ms)。\n\n`;
+        let resultText = `### ${isRelevance ? '🔍 相关性扫描' : (isGraph ? '🕸️ 全局拓扑' : (isImpactBrief ? '🛡️ 安全检测报告' : '🛠️ 建议行动计划'))}: [${targetNode.name}]\n`;
+        resultText += `> 💡 **感应发现**: 在你当前的上下文之外，识别到 **${collaborators.length}** 个受影响的外部位置点。\n\n`;
 
-        if (collaborators.length > 5 && (isQuick || isGraph)) {
+        if (isRelevance) {
+           if (collaborators.length > 0) {
+              resultText += `⚠️ **检测到潜在风险**: 该节点存在 **${collaborators.length}** 个跨层级依赖。强烈建议在修改前运行 \`impact_brief\` 以查看详细受影响路径。`;
+           } else {
+              resultText += "✅ **低风险**: 未发现跨层级依赖。可以直接进行局部修改。";
+           }
+        } else if (collaborators.length > 5 && (isQuick || isGraph)) {
            const top3 = suggestedEdits.slice(0, 3);
            const othersCount = suggestedEdits.length - 3;
-           resultText += `**关键扩散路径：**\n` + JSON.stringify(top3, null, 2) + `\n\n`;
+           resultText += `**⚠️ 必须同步修改的关键路径：**\n` + JSON.stringify(top3, null, 2) + `\n\n`;
            resultText += `<details>\n<summary>点击展开另外 ${othersCount} 个关联项...</summary>\n\n` + JSON.stringify(suggestedEdits.slice(3), null, 2) + `\n</details>\n`;
         } else if (collaborators.length > 0) {
-           resultText += `**变更建议清单 (suggestedEdits):**\n` + JSON.stringify(suggestedEdits, null, 2);
+           resultText += `**✅ 建议同步执行的任务清单 (suggestedEdits):**\n` + JSON.stringify(suggestedEdits, null, 2);
         } else {
-           resultText += "✅ 未发现显著跨模块影响。可以直接修改。";
+           resultText += "✅ **感应安全**: 未在全工程内发现显著跨模块影响。可以直接修改该局部节点。";
         }
 
-        if (complexityScore > 50) resultText += `\n\n⚠️ **高风险提示**: 影响范围较广 (风险值: ${complexityScore})，修改后请务必执行全量回归。`;
+        if (!isRelevance && complexityScore > 50) resultText += `\n\n🚨 **高回归风险警告**: 此节点的改动具有全局穿透性 (风险值: ${complexityScore})，严禁跳过同步修改和全量回归。`;
+        
+        // --- Next Steps Guidance ---
+        resultText += `\n\n---\n**💡 下一步建议 (Next Steps):**\n`;
+        if (isRelevance) {
+           resultText += collaborators.length > 0 ? `1. 调用 \`impact_brief\` 获取详细风险报告。\n2. 评估是否需要重构。` : `1. 直接按计划修改代码。`;
+        } else if (isImpactBrief) {
+           resultText += `1. 调用 \`quick_check\` 生成具体的同步修改计划 (suggestedEdits)。\n2. 确认受影响的 XML/Mapper 是否需要手动映射。`;
+        } else if (isQuick) {
+           resultText += `1. 将上述清单加入你的 TODO。\n2. 修改完成后，调用 \`assess_bulk_impact\` 进行最终验证。`;
+        } else {
+           resultText += `1. 确认拓扑结构是否符合预期。\n2. 如需修改，请先运行 \`impact_brief\`。`;
+        }
         
         const finalResult = {
           content: [{ type: 'text', text: resultText }],
@@ -387,6 +428,22 @@ export class GuardianMcpServer {
         const context = await this.manager.getContext(filePath || process.cwd());
         if (!context) return { content: [{ type: 'text', text: 'Error: Cannot initialize context.' }] };
         return { content: [{ type: 'text', text: `Full scan manual trigger for [${context.rootDir}] success.` }] };
+      }
+
+      case 'sync_file': {
+        const { filePath } = request.params.arguments as { filePath?: string };
+        if (!filePath) throw new Error('filePath is required for sync_file');
+        const context = await this.manager.getContext(filePath);
+        if (!context) throw new Error(`Could not resolve context for ${filePath}`);
+        
+        const fs = await import('fs');
+        if (!fs.existsSync(filePath)) throw new Error(`File does not exist: ${filePath}`);
+        const content = fs.readFileSync(filePath, 'utf-8');
+        await context.orchestrator.analyzeFile(filePath, content);
+        
+        return {
+          content: [{ type: 'text', text: `✅ [SUCCESS] File has been synchronously re-indexed: ${filePath}. Knowledge Graph is up to date.` }]
+        };
       }
 
       default:

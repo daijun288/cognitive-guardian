@@ -37,7 +37,14 @@ export class ContextManager {
   /**
    * 获取或创建一个项目的上下文
    */
-  public async getContext(filePath: string): Promise<ProjectContext | null> {
+  public async getContext(filePath?: string): Promise<ProjectContext | null> {
+    if (!filePath) {
+      if (this.defaultRoot) {
+        const normalizedRoot = this.defaultRoot.replace(/\\/g, '/');
+        return this.contexts.get(normalizedRoot) || null;
+      }
+      return this.contexts.values().next().value || null;
+    }
     const normalizedInput = filePath.replace(/\\/g, '/');
     
     // 1. 如果已有 context 覆盖了该路径（处理绝对路径或已解析路径）
@@ -77,10 +84,11 @@ export class ContextManager {
       if (!normalizedInput.includes('/') && (normalizedInput.endsWith('.java') || normalizedInput.endsWith('.js') || normalizedInput.endsWith('.ts') || normalizedInput.endsWith('.vue'))) {
         this.logger(`[Ambiguous Path] Attempting global file-lookup for: ${normalizedInput}`);
         for (const [rootDir, context] of this.contexts.entries()) {
-          // 查找 store 中是否包含该文件名的任何节点
-          const allFiles = context.store.getAllNodes().map(n => n.file.replace(/\\/g, '/'));
-          const match = allFiles.find(f => f.endsWith('/' + normalizedInput) || f === normalizedInput);
-          if (match) {
+          // 查找 store 中是否包含该文件名的物理全路径，替代原本的 getAllNodes 全表扫！ (IDEA 倒排索引思维)
+          const matchedFiles = context.store.getFilesBySuffix(normalizedInput);
+          const firstMatch = matchedFiles[0];
+          if (firstMatch) {
+            const match = firstMatch.replace(/\\/g, '/');
             this.logger(`[Ambiguous Path] Success! Self-corrected [${normalizedInput}] to [${match}]`);
             return context;
           }

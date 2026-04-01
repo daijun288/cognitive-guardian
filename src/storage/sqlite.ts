@@ -35,7 +35,15 @@ export class KnowledgeGraphStore {
     this.init();
   }
 
+  // Phase 5: 预编译热路径 SQL 语句 —— 消除每次 insert 时的重复 prepare 开销
+  private stmtInsertNode!: Database.Statement;
+  private stmtInsertEdge!: Database.Statement;
+
   private init() {
+    // Phase 5: 启用 WAL 模式 —— 支持并发读写，写入吞吐提升 5-10 倍
+    this.db.pragma('journal_mode = WAL');
+    this.db.pragma('synchronous = NORMAL');
+    
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS nodes (
         id TEXT PRIMARY KEY,
@@ -84,22 +92,24 @@ export class KnowledgeGraphStore {
         PRIMARY KEY (fileA, fileB)
       );
     `);
-  }
 
-  public insertNode(node: Node) {
-    const stmt = this.db.prepare(`
+    // 预编译高频 SQL —— 整个生命周期只编译一次
+    this.stmtInsertNode = this.db.prepare(`
       INSERT OR REPLACE INTO nodes (id, type, name, fullName, file, startLine, startColumn, endLine, endColumn, metadata)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
-    stmt.run(node.id, node.type, node.name, node.fullName, node.file, node.startLine, node.startColumn, node.endLine, node.endColumn, node.metadata);
-  }
-
-  public insertEdge(edge: Edge) {
-    const stmt = this.db.prepare(`
+    this.stmtInsertEdge = this.db.prepare(`
       INSERT OR REPLACE INTO edges (id, type, sourceId, targetId, metadata)
       VALUES (?, ?, ?, ?, ?)
     `);
-    stmt.run(edge.id, edge.type, edge.sourceId, edge.targetId, edge.metadata);
+  }
+
+  public insertNode(node: Node) {
+    this.stmtInsertNode.run(node.id, node.type, node.name, node.fullName, node.file, node.startLine, node.startColumn, node.endLine, node.endColumn, node.metadata);
+  }
+
+  public insertEdge(edge: Edge) {
+    this.stmtInsertEdge.run(edge.id, edge.type, edge.sourceId, edge.targetId, edge.metadata);
   }
 
   public getNodesByFile(file: string): Node[] {
@@ -189,6 +199,24 @@ export class KnowledgeGraphStore {
     return this.db.prepare('SELECT * FROM nodes WHERE name = ?').all(name) as Node[];
   }
 
+  public getFilesBySuffix(suffix: string): string[] {
+    // Uses SQLite LIKE for efficient suffix matching, distinct avoids flooding memory
+    const rows = this.db.prepare(`
+      SELECT DISTINCT file FROM nodes 
+      WHERE file LIKE ? OR file = ?
+    `).all(`%/${suffix}`, suffix) as { file: string }[];
+    return rows.map(r => r.file);
+  }
+
+  public getNodesByJsonFlag(flagPath: string): Node[] {
+    // IDEA Stub-like json_extract lookup for highly efficient metadata matching
+    return this.db.prepare(`
+      SELECT * FROM nodes 
+      WHERE json_extract(metadata, ?) = 1 
+         OR json_extract(metadata, ?) = 'true'
+    `).all(`$.${flagPath}`, `$.${flagPath}`) as Node[];
+  }
+
   public runInTransaction(fn: () => void) {
     const transaction = this.db.transaction(fn);
     transaction();
@@ -221,7 +249,7 @@ export class KnowledgeGraphStore {
         CASE WHEN LOWER(fileA) = LOWER(?) THEN fileB ELSE fileA END as partner,
         coChangeCount, confidence
       FROM git_co_changes
-      WHERE LOWER(fileA) = LOWER(?) OR LOWER(fileB) = LOWER(?)
+      WHERE (LOWER(fileA) = LOWER(?) OR LOWER(fileB) = LOWER(?))
       AND confidence >= ?
       ORDER BY confidence DESC, coChangeCount DESC
     `).all(normalizedFile, normalizedFile, normalizedFile, minConfidence) as { partner: string; coChangeCount: number; confidence: number }[];

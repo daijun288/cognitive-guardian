@@ -1,4 +1,5 @@
-import { execSync } from 'child_process';
+import { spawn, execSync } from 'child_process';
+import { createInterface } from 'readline';
 import { KnowledgeGraphStore } from '../storage/sqlite.js';
 
 export interface GitFileStats {
@@ -38,7 +39,7 @@ export class GitAnalyzer {
   }
 
   /**
-   * Analyze git history and persist results to SQLite
+   * Phase 4: 流式 Git 历史分析 —— 使用 spawn + readline，内存占用恒定 O(1)
    */
   public async analyzeHistory(rootDir: string, store: KnowledgeGraphStore, maxCommits: number = 200): Promise<{
     totalCommitsAnalyzed: number;
@@ -50,39 +51,39 @@ export class GitAnalyzer {
       return { totalCommitsAnalyzed: 0, uniqueFiles: 0, coChangePairs: 0 };
     }
 
-    this.logger(`Starting Git history analysis (last ${maxCommits} commits)...`);
+    this.logger(`Starting Git history analysis (last ${maxCommits} commits) [Streaming Mode]...`);
     const startTime = Date.now();
-
-    // 1. Get git log with file changes
-    const rawLog = this.getGitLog(rootDir, maxCommits);
-    const commits = this.parseGitLog(rawLog);
-    
-    this.logger(`Parsed ${commits.length} commits.`);
-
-    // 2. Build file stats and co-change matrix
-    const fileStats = new Map<string, { totalCommits: number; bugFixCommits: number; lastModified: string }>();
-    const coChangeMatrix = new Map<string, number>(); // "fileA|fileB" -> count
 
     const bugPatterns = /fix|bug|hotfix|修复|缺陷|问题|紧急|回退|revert/i;
 
-    for (const commit of commits) {
-      const isBugFix = bugPatterns.test(commit.message);
-      const files = commit.files
+    // 流式状态机
+    const fileStats = new Map<string, { totalCommits: number; bugFixCommits: number; lastModified: string }>();
+    const coChangeMatrix = new Map<string, number>();
+    let totalCommitsAnalyzed = 0;
+
+    // 当前正在解析的 commit 的临时状态
+    let currentCommit: { date: string; message: string; isBugFix: boolean } | null = null;
+    let currentFiles: string[] = [];
+
+    // 当遇到新的 COMMIT 行或流结束时，将上一个 commit 的数据刷入统计
+    const flushCurrentCommit = () => {
+      if (!currentCommit) return;
+      totalCommitsAnalyzed++;
+
+      const files = currentFiles
         .map(f => f.replace(/\\/g, '/').toLowerCase())
         .filter(f => this.isCodeFile(f));
 
-      // Update per-file stats
       for (const file of files) {
         const existing = fileStats.get(file) || { totalCommits: 0, bugFixCommits: 0, lastModified: '' };
         existing.totalCommits++;
-        if (isBugFix) existing.bugFixCommits++;
-        if (!existing.lastModified || commit.date > existing.lastModified) {
-          existing.lastModified = commit.date;
+        if (currentCommit.isBugFix) existing.bugFixCommits++;
+        if (!existing.lastModified || currentCommit.date > existing.lastModified) {
+          existing.lastModified = currentCommit.date;
         }
         fileStats.set(file, existing);
       }
 
-      // Build co-change pairs (only for commits with 2-20 files to avoid noise from mass commits)
       if (files.length >= 2 && files.length <= 20) {
         for (let i = 0; i < files.length; i++) {
           for (let j = i + 1; j < files.length; j++) {
@@ -91,12 +92,65 @@ export class GitAnalyzer {
           }
         }
       }
-    }
 
-    // 3. Calculate churn scores (normalize to 0-100)
+      currentCommit = null;
+      currentFiles = [];
+    };
+
+    // 核心：spawn 子进程 + readline 逐行流式处理
+    await new Promise<void>((resolve, reject) => {
+      const gitProcess = spawn('git', [
+        'log', '--numstat', `--format=COMMIT|%aI|%s`, `-n`, `${maxCommits}`, '--diff-filter=ACDMR'
+      ], { cwd: rootDir, stdio: ['pipe', 'pipe', 'pipe'] });
+
+      const rl = createInterface({ input: gitProcess.stdout });
+
+      rl.on('line', (line: string) => {
+        if (line.startsWith('COMMIT|')) {
+          // 遇到新 commit 标记，先刷掉上一个
+          flushCurrentCommit();
+          const parts = line.split('|');
+          currentCommit = {
+            date: parts[1] || '',
+            message: parts.slice(2).join('|'),
+            isBugFix: bugPatterns.test(parts.slice(2).join('|')),
+          };
+        } else if (currentCommit && line.trim()) {
+          const match = line.match(/^\d+\t\d+\t(.+)$/);
+          if (match && match[1]) {
+            let fileName = match[1];
+            if (fileName.includes('=>')) {
+              if (fileName.includes('{') && fileName.includes('}')) {
+                fileName = fileName.replace(/\{[^}]*=>\s*([^}]+)\}/, '$1').replace(/\/\//g, '/');
+              } else {
+                const parts = fileName.split('=>');
+                const lastPart = parts[parts.length - 1];
+                fileName = lastPart ? lastPart.trim() : '';
+              }
+            }
+            currentFiles.push(fileName.trim());
+          }
+        }
+      });
+
+      rl.on('close', () => {
+        flushCurrentCommit(); // 刷掉最后一个 commit
+        resolve();
+      });
+
+      gitProcess.on('error', (err) => {
+        this.logger(`Git spawn failed: ${err.message}`);
+        resolve(); // 优雅降级，不抛异常
+      });
+
+      gitProcess.stderr.on('data', () => {
+        // 静默忽略 stderr 输出
+      });
+    });
+
+    // 计算 churn scores 并持久化
     const maxCommitCount = Math.max(...Array.from(fileStats.values()).map(s => s.totalCommits), 1);
 
-    // 4. Persist to SQLite
     store.clearGitData();
     store.runInTransaction(() => {
       for (const [file, stats] of fileStats.entries()) {
@@ -117,10 +171,8 @@ export class GitAnalyzer {
         const statsB = fileStats.get(fileB);
         if (!statsA || !statsB) continue;
 
-        // Confidence = co-change count / max(commitsA, commitsB)
         const confidence = count / Math.max(statsA.totalCommits, statsB.totalCommits);
         
-        // Only persist meaningful patterns (confidence > 0.2 and at least 2 co-changes)
         if (confidence >= 0.2 && count >= 2) {
           store.insertCoChange({
             fileA, fileB,
@@ -135,55 +187,13 @@ export class GitAnalyzer {
 
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
     const coChangePairs = Array.from(coChangeMatrix.values()).filter(v => v >= 2).length;
-    this.logger(`Git analysis complete in ${duration}s. Files: ${fileStats.size}, Co-change pairs: ${coChangePairs}.`);
+    this.logger(`Git analysis complete in ${duration}s. Files: ${fileStats.size}, Co-change pairs: ${coChangePairs}. [Streaming Mode]`);
 
     return {
-      totalCommitsAnalyzed: commits.length,
+      totalCommitsAnalyzed,
       uniqueFiles: fileStats.size,
       coChangePairs,
     };
-  }
-
-  private getGitLog(rootDir: string, maxCommits: number): string {
-    try {
-      // Format: HASH|DATE|MESSAGE\n\nfile1\nfile2\n...
-      return execSync(
-        `git log --numstat --format="COMMIT|%aI|%s" -n ${maxCommits} --diff-filter=ACDMR`,
-        { cwd: rootDir, maxBuffer: 50 * 1024 * 1024, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
-      );
-    } catch (err) {
-      this.logger(`Git log failed: ${err instanceof Error ? err.message : err}`);
-      return '';
-    }
-  }
-
-  private parseGitLog(raw: string): { date: string; message: string; files: string[] }[] {
-    const commits: { date: string; message: string; files: string[] }[] = [];
-    if (!raw) return commits;
-
-    const lines = raw.split('\n');
-    let current: { date: string; message: string; files: string[] } | null = null;
-
-    for (const line of lines) {
-      if (line.startsWith('COMMIT|')) {
-        if (current) commits.push(current);
-        const parts = line.split('|');
-        current = {
-          date: parts[1] || '',
-          message: parts.slice(2).join('|'),
-          files: [],
-        };
-      } else if (current && line.trim()) {
-        // numstat format: additions\tdeletions\tfilename
-        const match = line.match(/^\d+\t\d+\t(.+)$/);
-        if (match && match[1]) {
-          current.files.push(match[1]);
-        }
-      }
-    }
-    if (current) commits.push(current);
-
-    return commits;
   }
 
   private isCodeFile(file: string): boolean {
