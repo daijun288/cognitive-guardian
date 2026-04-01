@@ -53,6 +53,15 @@ npm install
 npm run dev
 ```
 
+## 🤖 引导 AI 正确使用 (强烈推荐)
+
+本 MCP 的最大发挥前提是 **让 AI 知道何时触发它、何时不要触发它**，以达到最佳的性能与防雷达平衡。
+
+建议将本仓库中的 [`AI_AGENT_INSTRUCTIONS.md`](AI_AGENT_INSTRUCTIONS.md) (约 1000 字符) 的全部内容提取，合并写入到您目标业务工程根目录下的以下任意文件中：
+- `.cursorrules` (如果是 Cursor)
+- `CLAUDE.md` (如果是 Claude Desktop/Code)
+- 或以系统提示词 (System Prompt) 形式配置给你的代理客户端。
+
 ## 📂 项目模块结构
 - `src/engine/`: 中枢扫描引擎 (Orchestrator)、Git 脉络流式重构提取、并发 FileWatcher。
 - `src/mcp/`: 标准化大模型对话接口层 (MCP工具箱包含 `impact_brief`, `sync_file` 等)。
